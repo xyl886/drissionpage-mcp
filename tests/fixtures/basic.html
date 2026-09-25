@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>DrissionPage MCP 测试页</title>
+</head>
+<body>
+  <h1 id="title">MCP 测试页</h1>
+
+  <!-- 多 class 元素：用于验证 DP 的 '.cls' 精确匹配语义坑 -->
+  <div class="read-content j_readContent" id="article">
+    <p>第一段正文</p>
+    <p>第二段正文</p>
+  </div>
+
+  <!-- 输入与按钮 -->
+  <input id="kw" name="kw" type="text" placeholder="请输入关键字">
+  <button id="btn" onclick="document.getElementById('result').textContent='clicked:'+document.getElementById('kw').value">
+    提交
+  </button>
+  <div id="result">未点击</div>
+
+  <!-- 下拉框 -->
+  <select id="city">
+    <option value="bj">北京</option>
+    <option value="sh">上海</option>
+    <option value="gz">广州</option>
+  </select>
+
+  <!-- 复选框 -->
+  <input type="checkbox" id="agree"> 同意
+
+  <!-- 列表：用于批量定位 -->
+  <ul id="list">
+    <li class="item" data-id="1"><a href="/detail/1">条目一</a></li>
+    <li class="item" data-id="2"><a href="/detail/2">条目二</a></li>
+    <li class="item" data-id="3"><a href="/detail/3">条目三</a></li>
+  </ul>
+
+  <!-- 用于测试网络监听 -->
+  <div id="netarea"></div>
+
+  <script>
+    // 页面加载后自动发一次真实请求（同目录 json），供网络监听测试捕获
+    setTimeout(function () {
+      fetch('data.json')
+        .then(function (r) { return r.json(); })
+        .then(function (d) { document.getElementById('netarea').textContent = JSON.stringify(d); })
+        .catch(function (e) { document.getElementById('netarea').textContent = 'fetch-failed'; });
+    }, 100);
+  </script>
+</body>
+</html>

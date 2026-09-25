@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# 虚拟环境（体积大，绝不提交）
+.venv/
+.venv*/
+venv/
+env/
+
+# 测试与缓存产物
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 本地临时产物
+*.tmp
+/tmp/
