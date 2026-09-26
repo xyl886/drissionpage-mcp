@@ -1,7 +1,7 @@
 [project]
 name = "drissionpage-mcp"
 version = "1.0.0"
-description = "DrissionPage MCP Server — 兼容 DrissionPage 4.0.5.6 与 4.1.x 的浏览器自动化/采集工具集（76 个工具）"
+description = "DrissionPage MCP Server — 兼容 DrissionPage 4.0.5.6 与 4.1.x 的浏览器自动化/采集工具集（96 个工具）"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

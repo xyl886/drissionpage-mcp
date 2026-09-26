@@ -1,7 +1,7 @@
 # DrissionPage MCP Server
 
 基于 [DrissionPage](https://github.com/g1879/DrissionPage) 的浏览器自动化 / 采集 MCP 服务器，
-**同时兼容 DrissionPage 4.0.5.6 与 4.1.1.4**，共 **76 个工具**。
+**同时兼容 DrissionPage 4.0.5.6 与 4.1.1.4**，共 **96 个工具**。
 
 设计目标：把社区几个成熟实现（jumodada 69 工具、crmmc 55 工具、骚神版 37 工具等）的长处
 合并成一份**可维护、可裁剪、双版本都能跑**的实现，而不是简单复制其中任何一个。
