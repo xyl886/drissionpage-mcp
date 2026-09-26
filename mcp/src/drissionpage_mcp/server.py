@@ -104,6 +104,16 @@ def _invoke(spec, arguments: dict) -> ToolResult:
         return ToolResult.ok(data=result)
     except DpMcpError as exc:
         return ToolResult.fail(f'{type(exc).__name__}: {exc}')
+    except AttributeError as exc:
+        # 离线静态元素（SessionElement）没有 click/input/states 等浏览器专有成员，
+        # 直接抛 AttributeError 对模型不友好，这里翻译成可执行的提示。
+        return ToolResult.fail(
+            f'工具 {spec.name} 无法在该元素上执行：{exc}。'
+            '若元素来自 dp_html_parse / dp_parse_file / dp_session_request(parse_html=true)，'
+            '它是离线静态元素，只支持读取（text / html / attr / link / 相对关系查找），'
+            '不支持点击、输入、悬停等交互；'
+            '请先 dp_browser_connect + dp_navigate，在浏览器模式下重新定位该元素。'
+        )
     except Exception as exc:  # 非预期错误：保留类型名，便于定位
         detail = traceback.format_exc(limit=6)
         return ToolResult.fail(f'工具 {spec.name} 执行失败：{type(exc).__name__}: {exc}\n{detail}')

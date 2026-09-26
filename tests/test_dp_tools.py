@@ -2,7 +2,7 @@
 """DrissionPage MCP 工具层的端到端测试（直接调用 handler，不经 MCP 协议）。
 
 用法：
-    set PYTHONPATH=<MCP 项目>\src
+    set PYTHONPATH=<MCP 项目>/src
     python test_dp_tools.py [--headless] [--fixture <html 路径>]
 
 覆盖：连接 → 导航 → 定位（含 DP 语义坑）→ 交互 → 读取 → 截图 →
@@ -22,11 +22,11 @@ from drissionpage_mcp import tools  # noqa: F401  触发工具注册
 PASS, FAIL = [], []
 
 
-def call(name, **kwargs):
+def call(tool_name, **kwargs):
     """调用一个工具并打印结果。"""
-    spec = registry.get(name)
+    spec = registry.get(tool_name)
     if spec is None:
-        raise AssertionError(f'工具未注册：{name}')
+        raise AssertionError(f'工具未注册：{tool_name}')
     result = spec.handler(kwargs)
     payload = result.data if result.data is not None else result.text
     try:
@@ -34,7 +34,7 @@ def call(name, **kwargs):
     except (TypeError, ValueError):
         shown = str(payload)
     tag = 'ERR ' if result.error else 'OK  '
-    print(f'{tag}{name}: {shown[:400]}')
+    print(f'{tag}{tool_name}: {shown[:400]}')
     return result
 
 
@@ -105,6 +105,73 @@ def main():
     link = call('dp_get_link', element_id=a_ele.data['element_id'])
     check('链接绝对化正确', '/detail/1' in str(link.data.get('link', '')),
           f"实际={link.data.get('link')}")
+
+    # 5b. iframe 与 Shadow DOM 穿透
+    print('\n[5b] iframe 与 Shadow DOM 穿透')
+    frames = call('dp_frame_list')
+    check('能列出 iframe', frames.data.get('count', 0) >= 1,
+          f"实际={frames.data.get('count')}")
+
+    in_frame = call('dp_frame_find', frame_selector='@id=inner-frame',
+                    selector='@id=in-frame')
+    check('可进入 iframe 定位元素', not in_frame.error, str(in_frame.data)[:150])
+
+    host = call('dp_find_element', selector='@id=shadow-host')
+    shadow = call('dp_shadow_find', host_element_id=host.data['element_id'],
+                  selector='@class:shadow-item')
+    check('可穿透 Shadow DOM 定位', not shadow.error, str(shadow.data)[:150])
+
+    shadow_all = call('dp_shadow_find', host_element_id=host.data['element_id'],
+                      selector='@class:shadow-item', all=True)
+    check('shadow root 内可批量定位到 2 个', shadow_all.data.get('count') == 2,
+          f"实际={shadow_all.data.get('count')}")
+
+    # 5c. 动作链 / 元素修改 / 超时设置
+    print('\n[5c] 动作链、元素修改、超时设置')
+
+    kw_ele = call('dp_find_element', selector='@id=kw')
+    chain = call('dp_action_chain', steps=json.dumps([
+        {'action': 'move_to', 'element_id': kw_ele.data['element_id']},
+        {'action': 'click'},
+        {'action': 'type', 'text': 'chain'},
+    ]))
+    check('动作链执行成功', not chain.error and chain.data.get('steps') == 3,
+          str(chain.data)[:150])
+
+    combo = call('dp_action_chain', steps=json.dumps([
+        {'action': 'key_down', 'key': 'ctrl'},
+        {'action': 'type', 'text': 'a'},
+        {'action': 'key_up', 'key': 'ctrl'},
+    ]))
+    check('组合键动作链成功', not combo.error, str(combo.data)[:120])
+
+    bad_chain = call('dp_action_chain', steps=json.dumps([{'action': 'not_exist'}]))
+    check('非法动作被明确拒绝', bad_chain.error)
+
+    title_ele = call('dp_find_element', selector='@id=title')
+    setres = call('dp_element_set', element_id=title_ele.data['element_id'],
+                  what='style', name='color', value='red')
+    check('可修改元素样式（ele.set.style）', not setres.error, str(setres.data)[:120])
+
+    setvalue = call('dp_element_set', element_id=kw_ele.data['element_id'],
+                    what='value', value='by-set')
+    check('可直接设置表单 value', not setvalue.error, str(setvalue.data)[:120])
+
+    timeouts = call('dp_set_timeouts', base=15, page_load=30)
+    check('可设置各类超时', not timeouts.error, str(timeouts.data)[:120])
+
+    # 页面级重试策略：长循环采集里设一次即可，区别于 dp_navigate 的单次 retry 参数
+    retry = call('dp_set_retry', times=2, interval=1)
+    verified = (retry.data or {}).get('verified', {})
+    check('可设置页面级重试并回读生效',
+          not retry.error and verified.get('retry_times') == 2
+          and verified.get('retry_interval') == 1, str(retry.data)[:150])
+
+    retry_none = call('dp_set_retry')
+    check('重试策略两参数都不传时被明确拒绝', retry_none.error, retry_none.text[:120])
+
+    silent = call('dp_listen_wait_silent', timeout=3)
+    check('可等待网络静默', not silent.error, str(silent.data)[:120])
 
     # 6. 下拉框 / 复选框
     print('\n[6] 表单控件')

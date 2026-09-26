@@ -265,6 +265,35 @@ def actions_db_click(tab: Any) -> bool:
     return _has(getattr(tab, 'actions', None), 'db_click')
 
 
+def set_timeouts(tab: Any, base: Any = None, page_load: Any = None,
+                 script: Any = None, implicit: Any = None) -> dict:
+    """设置各类超时，自动丢弃当前版本不支持的参数。
+
+    版本差异（实测）：
+    - 4.0.5.6：``set.timeouts(base, page_load, script, implicit)``
+    - 4.1.x  ：``set.timeouts(base, page_load, script)`` —— 传 ``implicit`` 会 TypeError
+
+    这里按真实签名过滤，调用方不必关心版本。
+    """
+    import inspect as _inspect
+
+    setter = getattr(getattr(tab, 'set', None), 'timeouts', None)
+    if setter is None:
+        raise unsupported('设置页面超时')
+
+    try:
+        allowed = set(_inspect.signature(setter).parameters)
+    except (TypeError, ValueError):  # pragma: no cover - 动态实现兜底
+        allowed = {'base', 'page_load', 'script', 'implicit'}
+
+    wanted = {'base': base, 'page_load': page_load,
+              'script': script, 'implicit': implicit}
+    applied = {k: v for k, v in wanted.items() if v is not None and k in allowed}
+    dropped = [k for k, v in wanted.items() if v is not None and k not in allowed]
+    setter(**applied)
+    return {'applied': applied, 'dropped': dropped}
+
+
 def describe_capabilities() -> dict:
     """输出当前版本的能力矩阵，供 doctor 工具与 skill 使用。"""
     return {

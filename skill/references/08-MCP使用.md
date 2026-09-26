@@ -1,6 +1,6 @@
 # 08 · DrissionPageMCP 使用
 
-自研 MCP：`<repo>/mcp`，**76 个工具**，
+自研 MCP：`<repo>/mcp`，**96 个工具**，
 兼容 DrissionPage 4.0.5.6 与 4.1.x。
 
 ## 什么时候用 MCP，什么时候写脚本
@@ -18,6 +18,68 @@ MCP 保持 DrissionPage 原生定位语义，**不会**把 `.cls` 改写成 CSS 
 的定位规则在 MCP 里同样适用。
 
 ## 工具分组与 Python API 对照
+
+### parse（3）· 离线解析 —— 对应 `make_session_ele`
+
+真实采集项目里最高频的解析方式（浏览器取一次 HTML，之后全靠静态解析）。
+
+| MCP 工具 | 对应 Python |
+|---|---|
+| `dp_html_parse` | `make_session_ele(html)` → 返回 `root_id` |
+| `dp_html_query` | 解析 + `page.ele()` 一步完成；传 `root_id` 可复用已解析的树 |
+| `dp_parse_file` | 从落盘 HTML 文件解析并定位（断点续采的搭档） |
+
+`dp_find_element` / `dp_find_elements` 传 `root_id` 时就在离线树上定位，不需要浏览器。
+详见 `09-离线解析与断点续采.md`。
+
+### request（9）· 请求模式 —— 对应 `SessionPage`
+
+| MCP 工具 | 对应 Python |
+|---|---|
+| `dp_session_request` | `SessionPage().get/post()`；`parse_html=true` 时返回 `root_id` |
+| `dp_session_cookies` | `sp.cookies()` |
+| `dp_session_set_headers` | `sp.session.headers.update(...)` |
+| `dp_session_set` | `sp.set.proxies(http=,https=)` / `.timeout()` / `.retry_times()` / `.retry_interval()` / `.encoding()` / `.verify()` / `.stream()` / `.max_redirects()` / `.trust_env()` / `.auth()` |
+| `dp_session_close` | `sp.close()` |
+| `dp_transfer_cookies` | `WebPage.cookies_to_session()` / `cookies_to_browser()` 的等价能力 |
+| `dp_set_headers` / `dp_set_user_agent` / `dp_block_urls` | `page.set.headers()` / `.user_agent()` / `.blocked_urls()` |
+
+典型「登录一次、纯请求抓全量」：
+`dp_navigate`（登录）→ `dp_transfer_cookies(to_session)` → `dp_session_request(parse_html=true)` → 离线定位。
+
+抓全量前先 `dp_session_set` 一次性配好代理 / 超时 / 重试 / 编码，
+避免每帧请求重复传参；传 `clear_proxies=true` 可清空代理回直连。
+
+### guard（2）· 反爬自愈
+
+| MCP 工具 | 对应 Python |
+|---|---|
+| `dp_check_blocked` | 无直接对应：按特征文本判定是否被拦截（在线或离线 HTML） |
+| `dp_blocked_recovery` | 无直接对应：关浏览器 → 退避 → 重开 → 回原地址 |
+
+特征集与自愈循环的设计见 `11-反爬应对与自愈.md`。
+
+### structure（3）· iframe 与 Shadow DOM 穿透
+
+真实采集里最容易「定位不到」的两处结构。
+
+| MCP 工具 | 对应 Python |
+|---|---|
+| `dp_frame_list` | `page.get_frames()` |
+| `dp_frame_find` | `frame = page.get_frame(loc)` → `frame.ele(sel)` |
+| `dp_shadow_find` | `host.sr.ele(sel)`（4.0.5.6）/ `host.shadow_root.ele(sel)`（4.1.x） |
+
+两者返回的仍是普通 `element_id`，后续 `dp_get_text` / `dp_click` 等可直接复用。
+
+```python
+# Python 侧对应写法
+frame = page.get_frame('t:iframe')
+frame.ele('@id=in-frame').text
+
+host = page.ele('@id=shadow-host')
+host.sr.ele('@class:shadow-item').text        # 4.0.5.6
+host.shadow_root.ele('@class:shadow-item')    # 4.1.x 亦可用
+```
 
 ### browser（4）
 
@@ -39,7 +101,7 @@ MCP 保持 DrissionPage 原生定位语义，**不会**把 `.cls` 改写成 CSS 
 | `dp_tab_close` | `tab.close()` / `page.close_tabs(others=True)` |
 | `dp_tab_describe` | `tab.url` / `tab.title` / `tab.user_agent` |
 
-### element（21）
+### element（24）
 
 | MCP 工具 | 对应 Python |
 |---|---|
@@ -57,7 +119,7 @@ MCP 保持 DrissionPage 原生定位语义，**不会**把 `.cls` 改写成 CSS 
 | `dp_element_query` | `ele.child()` / `ele.parent()` / `ele.next()` / … |
 | `dp_click_xy` | `page.actions.move_to(...).click()` |
 
-### navigate（13）/ network（8）/ storage（8）/ artifacts（7）/ script（3）/ dialog（3）/ request（3）
+### navigate（15）/ network（9）/ storage（8）/ artifacts（7）/ script（3）/ dialog（3）/ 页面级 request
 
 | MCP 工具 | 对应 Python |
 |---|---|
@@ -67,6 +129,8 @@ MCP 保持 DrissionPage 原生定位语义，**不会**把 `.cls` 改写成 CSS 
 | `dp_page_info` / `dp_get_html` | `page.url` / `page.title` / `page.html` |
 | `dp_scroll` | `page.scroll.*` |
 | `dp_wait*` 系列 | `page.wait.*` |
+| `dp_set_retry` | `page.set.retry_times()` + `page.set.retry_interval()`（页面级重试策略，长循环设一次即可） |
+| `dp_set_timeouts` | `page.set.timeouts(base, page_load, script, implicit)`（`implicit` 仅 4.0.5.6 有，自动过滤） |
 | `dp_listen_start/wait/steps/stop/clear/pause_resume` | `page.listen.*` |
 | `dp_console_logs` | `tab.console`（4.1+）/ 4.0.5.6 返回不支持提示 |
 | `dp_run_cdp` / `dp_run_js` | `page.run_cdp()` / `page.run_js()` |

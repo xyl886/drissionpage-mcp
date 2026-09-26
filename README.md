@@ -5,9 +5,9 @@
 
 | 组件 | 说明 |
 |---|---|
-| [`mcp/`](mcp/) | **DrissionPage MCP Server**，76 个工具，stdio 传输，可挂到任意 MCP 客户端 |
-| [`skill/`](skill/) | **Agent skill**，`SKILL.md` + 8 篇 references，讲透定位语义、抓包、等待、版本差异与实战坑 |
-| [`tests/`](tests/) | 端到端测试、协议层测试、两版 API 差异比对脚本 |
+| [`mcp/`](mcp/) | **DrissionPage MCP Server**，96 个工具，stdio 传输，可挂到任意 MCP 客户端 |
+| [`skill/`](skill/) | **Agent skill**，`SKILL.md` + 12 篇 references，讲透定位语义、抓包、等待、版本差异与实战坑 |
+| [`tests/`](tests/) | 端到端 / 离线 / 协议层测试、语义探测、文档 API 核验、两版 API 差异比对脚本 |
 
 两者是配套的：MCP 负责「动手」，skill 负责「怎么动才对」。
 直接用 skill 会让 agent 知道 `.cls` 是整串精确匹配这类反直觉规则；
@@ -83,8 +83,14 @@ python -m drissionpage_mcp --list-tools  # 全部工具
 # 端到端：连接 → 导航 → 定位语义 → 交互 → 截图 → 监听 → 标签页
 python tests/test_dp_tools.py --headless
 
+# 离线解析 / 请求模式 / 反爬检测（不需要浏览器）
+python tests/test_dp_offline.py
+
 # MCP 协议层：stdio 握手 / tools/list / tools/call
 python tests/test_dp_mcp_protocol.py
+
+# 文档里出现的 API 调用链是否真实存在（需浏览器）
+python tests/check_doc_api.py
 
 # 重新生成两版 API 差异报告
 python tests/dump_api.py > api_4x.txt
@@ -95,8 +101,10 @@ python tests/api_diff.py <旧版目录> <新版目录>
 
 | 测试 | DrissionPage 4.0.5.6 | DrissionPage 4.1.1.4 |
 |---|---|---|
-| `test_dp_tools.py` | 15/15 通过 | 15/15 通过 |
-| `test_dp_mcp_protocol.py` | 15/15 通过 | — |
+| `test_dp_tools.py` | 28/28 通过 | 28/28 通过 |
+| `test_dp_offline.py` | 29/29 通过 | 29/29 通过 |
+| `test_dp_mcp_protocol.py` | 17/17 通过 | 17/17 通过 |
+| `check_doc_api.py` | 169 调用链通过 / 0 错误 | 同左（9 项版本特定已标注） |
 
 ## 许可证
 

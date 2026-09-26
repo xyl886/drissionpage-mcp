@@ -180,6 +180,52 @@ def dp_listen_wait(args: dict) -> ToolResult:
 
 
 @registry.tool(
+    name='dp_listen_wait_silent',
+    description=(
+        '等待网络进入「静默」状态（一段时间内没有新请求）后再继续。\n'
+        '适用：视频/流媒体、瀑布流、异步拼装页面 —— 固定 sleep 猜不准，等静默才可靠。\n'
+        '典型用法：dp_listen_start → 触发加载（导航/点击）→ dp_listen_wait_silent → 再取 HTML 或抓包。\n'
+        'targets_only=true 时只考虑监听目标范围内的请求。'
+    ),
+    input_schema=schema(
+        timeout=NUM('最长等待秒数，默认 10', default=10),
+        targets_only=BOOL('只统计监听目标范围内的请求，默认 false', default=False),
+        limit=INT('静默判定的空闲毫秒阈值，0 表示用默认值', default=0),
+    ),
+    group='network',
+)
+def dp_listen_wait_silent(args: dict) -> ToolResult:
+    import time as _time
+
+    tab = SESSION.resolve_tab()
+    timeout = float(args.get('timeout') or 10)
+    kwargs = {
+        'timeout': timeout,
+        'targets_only': bool(args.get('targets_only', False)),
+    }
+    limit = int(args.get('limit') or 0)
+    if limit:
+        kwargs['limit'] = limit
+
+    started = _time.time()
+    try:
+        ok = tab.listen.wait_silent(**kwargs)
+    except Exception as exc:
+        return ToolResult.ok(
+            data={'silent': False, 'elapsed': round(_time.time() - started, 2)},
+            text=(
+                f'等待网络静默失败或超时（{type(exc).__name__}: {exc}）。'
+                '这通常说明页面仍在持续请求（长轮询 / 流媒体）；'
+                '可改用 dp_stop_loading，或直接继续取值。'
+            ),
+        )
+    return ToolResult.ok(
+        data={'silent': bool(ok), 'elapsed': round(_time.time() - started, 2)},
+        text='网络已静默' if ok else f'{timeout} 秒内网络未静默（页面可能仍在持续请求）',
+    )
+
+
+@registry.tool(
     name='dp_listen_steps',
     description='以迭代方式连续抓取多个包（适合流式接口/分页加载）。',
     input_schema=schema(

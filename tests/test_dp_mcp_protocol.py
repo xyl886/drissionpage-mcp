@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""DrissionPage MCP 协议层测试：以真实 MCP 客户端身份走 stdio 协议。
+r"""DrissionPage MCP 协议层测试：以真实 MCP 客户端身份走 stdio 协议。
 
 用法：
     set PYTHONPATH=<MCP 项目>\src
@@ -111,11 +111,13 @@ def main():
         res = client.send('tools/list', {})
         tools = res.get('result', {}).get('tools', [])
         print(f'  工具数量: {len(tools)}')
-        check('工具数量为 76', len(tools) == 76, f'实际={len(tools)}')
+        check('工具数量 >= 90（新增工具后无需改此断言）', len(tools) >= 90, f'实际={len(tools)}')
         names = {t['name'] for t in tools}
         check('包含 dp_browser_connect', 'dp_browser_connect' in names)
         check('包含 dp_find_element', 'dp_find_element' in names)
         check('包含 dp_listen_start', 'dp_listen_start' in names)
+        check('包含 dp_set_retry（页面级重试策略）', 'dp_set_retry' in names)
+        check('包含 dp_session_set（请求会话运行时配置）', 'dp_session_set' in names)
         bad = [t['name'] for t in tools if not t.get('inputSchema')]
         check('每个工具都有 inputSchema', not bad, f'缺失={bad[:5]}')
         # 校验 required 标记已被正确转换（不应残留内部字段）

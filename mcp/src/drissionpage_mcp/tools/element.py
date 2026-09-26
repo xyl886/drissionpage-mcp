@@ -18,8 +18,36 @@ from ..session import SELECTOR_DOC, SESSION, normalize_selector, selector_semant
 _TEXT_LIMIT = 300
 
 
-def _resolve_ele(args: dict, tab=None):
-    """按 element_id 或 selector 取元素对象。
+def _require_interactive(ele):
+    """交互类操作需要真实浏览器元素。
+
+    离线解析出来的 SessionElement 没有 ``click`` / ``input`` 等方法，
+    直接在底层抛 AttributeError 对模型不友好，这里提前给出可执行的提示。
+    """
+    if not hasattr(ele, 'states'):
+        raise DpMcpError(
+            '该元素来自离线 HTML 解析（SessionElement），只支持读取'
+            '（text / html / attr / link / 相对关系查找），不支持点击、输入等交互。'
+            '如需交互：先 dp_browser_connect + dp_navigate 打开真实页面，'
+            '再用不带 root_id 的 dp_find_element 重新定位。'
+        )
+    return ele
+
+
+def _resolve_ele(args: dict, tab=None, interactive: bool = False):
+    """按 element_id / selector / root_id 取元素对象。
+
+    ``interactive=True`` 时额外校验元素可交互：离线静态元素会给出明确提示，
+    而不是让底层抛 ``AttributeError``。
+    """
+    ele = _resolve_ele_impl(args, tab)
+    if interactive:
+        _require_interactive(ele)
+    return ele
+
+
+def _resolve_ele_impl(args: dict, tab=None):
+    """实际取值逻辑（不含交互校验）。
 
     找不到元素时抛出可读错误，而不是返回 NoneElement —— 后者会静默传播，
     让后续交互在毫无提示的情况下失败。
@@ -29,7 +57,20 @@ def _resolve_ele(args: dict, tab=None):
 
     selector = args.get('selector')
     if not selector:
-        raise DpMcpError('必须提供 element_id 或 selector 之一')
+        raise DpMcpError('必须提供 element_id，或 selector（可配合 root_id 在离线树上定位）')
+
+    # 离线树：root_id 来自 dp_html_parse / dp_parse_file / dp_session_request(parse_html=true)。
+    # 此时不需要浏览器，直接用静态解析定位 —— 快，且能对落盘的 HTML 复跑。
+    root_id = args.get('root_id')
+    if root_id:
+        root = SESSION.get_element(root_id)
+        ele = root.ele(normalize_selector(selector), index=int(args.get('index') or 1))
+        if not ele:
+            raise DpMcpError(
+                f'离线树 {root_id} 中未找到元素：{selector}'
+                f'（解析方式：{selector_semantics(selector)}）'
+            )
+        return ele
 
     tab = tab or SESSION.resolve_tab(args.get('tab_id'))
     ele = tab.ele(normalize_selector(selector), timeout=args.get('timeout'))
@@ -85,27 +126,40 @@ def _ele_summary(ele, tab=None) -> dict:
     name='dp_find_element',
     description=(
         f'定位单个元素，返回 element_id 与概要。{SELECTOR_DOC}\n'
-        'index 指定取第几个匹配（从 1 开始）；timeout 为等待秒数。'
+        'index 指定取第几个匹配（从 1 开始）；timeout 为等待秒数。\n'
+        '传 root_id 时在离线解析树（dp_html_parse / dp_parse_file 的产物）上定位，不需要浏览器。'
     ),
     input_schema=schema(
         selector=STR('定位串', required=True),
         index=INT('取第几个匹配，默认 1', default=1),
         timeout=NUM('等待元素出现的秒数'),
         tab_id=STR('指定标签页，缺省当前页'),
+        root_id=STR('离线解析树的 root_id（传了就不走浏览器）'),
     ),
     group='element',
 )
 def dp_find_element(args: dict) -> ToolResult:
-    tab = SESSION.resolve_tab(args.get('tab_id'))
+    root_id = args.get('root_id')
     selector = normalize_selector(args['selector'])
-    ele = tab.ele(selector, index=int(args.get('index') or 1), timeout=args.get('timeout'))
+    try:
+        if root_id:
+            ele = _resolve_ele(args)
+        else:
+            tab = SESSION.resolve_tab(args.get('tab_id'))
+            ele = tab.ele(selector, index=int(args.get('index') or 1),
+                          timeout=args.get('timeout'))
+    except DpMcpError as exc:
+        return ToolResult.fail(str(exc))
+
     if not ele:
         return ToolResult.fail(
             f'未找到元素：{selector}（解析方式：{selector_semantics(selector)}）'
         )
-    summary = _ele_summary(ele, tab)
+    summary = _ele_summary(ele, None if root_id else SESSION.resolve_tab(args.get('tab_id')))
     summary['selector'] = selector
     summary['selector_engine'] = selector_semantics(selector)
+    if root_id:
+        summary['root_id'] = root_id
     return ToolResult.ok(data=summary, text=f"已定位：{summary.get('text', '')[:80]}")
 
 
@@ -113,21 +167,40 @@ def dp_find_element(args: dict) -> ToolResult:
     name='dp_find_elements',
     description=(
         f'定位多个元素，返回 element_id 列表与概要。{SELECTOR_DOC}\n'
-        '采集列表页时用它一次拿到所有条目，再逐个用 element_id 读取。'
+        '采集列表页时用它一次拿到所有条目，再逐个用 element_id 读取。\n'
+        '传 root_id 时在离线解析树上定位，不需要浏览器（配合落盘 HTML 可反复解析）。'
     ),
     input_schema=schema(
         selector=STR('定位串', required=True),
         timeout=NUM('等待秒数'),
         limit=INT('最多返回数量，默认 50', default=50),
+        root_id=STR('离线解析树的 root_id（传了就不走浏览器）'),
     ),
     group='element',
 )
 def dp_find_elements(args: dict) -> ToolResult:
-    tab = SESSION.resolve_tab()
     selector = normalize_selector(args['selector'])
-    eles = tab.eles(selector, timeout=args.get('timeout'))
     limit = int(args.get('limit') or 50)
-    items = [_ele_summary(e, tab) for e in list(eles)[:limit]]
+    root_id = args.get('root_id')
+
+    if root_id:
+        try:
+            root = SESSION.get_element(root_id)
+        except DpMcpError as exc:
+            return ToolResult.fail(str(exc))
+        eles = list(root.eles(selector))[:limit]
+        return ToolResult.ok(data={
+            'count': len(eles),
+            'returned': len(eles),
+            'selector': selector,
+            'selector_engine': selector_semantics(selector),
+            'root_id': root_id,
+            'elements': [_ele_summary(e, None) for e in eles],
+        })
+
+    tab = SESSION.resolve_tab()
+    eles = list(tab.eles(selector, timeout=args.get('timeout')))
+    items = [_ele_summary(e, tab) for e in eles[:limit]]
     return ToolResult.ok(data={
         'count': len(eles),
         'returned': len(items),
@@ -221,7 +294,12 @@ def dp_snapshot(args: dict) -> ToolResult:
 )
 def dp_element_info(args: dict) -> ToolResult:
     ele = _resolve_ele(args)
-    tab = SESSION.resolve_tab()
+    # 离线解析出的静态元素不需要浏览器。这里不能无条件取标签页，
+    # 否则「只解析 HTML 读字段」的场景会因为没连浏览器而直接失败。
+    try:
+        tab = SESSION.resolve_tab()
+    except Exception:
+        tab = None
     data = _ele_summary(ele, tab)
     for name in ('html', 'inner_html', 'raw_text', 'css_path', 'xpath'):
         try:
@@ -234,12 +312,66 @@ def dp_element_info(args: dict) -> ToolResult:
         data['states'] = {
             key: bool(getattr(ele.states, key))
             for key in ('is_displayed', 'is_enabled', 'is_selected', 'is_checked',
-                        'is_clickable', 'is_alive', 'is_in_viewport')
+                        'is_clickable', 'is_alive', 'is_in_viewport',
+                        # 这三个容易被忽略，但在「元素被遮挡 / 只露出一半」时很关键
+                        'is_covered', 'has_rect', 'is_whole_in_viewport')
             if hasattr(ele.states, key)
         }
     except Exception:
         pass
     return ToolResult.ok(data=data)
+
+
+@registry.tool(
+    name='dp_element_set',
+    description=(
+        '修改元素（对应 ele.set.*）：属性、属性值(property)、innerHTML、内联样式、表单值。\n'
+        '常见用途：把被隐藏的元素显示出来、改 value 后再提交、临时调整样式便于截图、'
+        '把 readonly 输入框改成可写。\n'
+        '注意：改的是当前页面 DOM，刷新即失效。'
+    ),
+    input_schema=schema(
+        what=STR('要修改什么',
+                 enum=['attr', 'property', 'innerHTML', 'style', 'value'], required=True),
+        value=STR('要设置的值', required=True),
+        name=STR('attr / property / style 时的名称，如 data-id、src、display'),
+        element_id=STR('元素句柄 id'),
+        selector=STR('也可直接用定位串'),
+        timeout=NUM('定位超时秒数'),
+    ),
+    group='element',
+    mutating=True,
+)
+def dp_element_set(args: dict) -> ToolResult:
+    ele = _resolve_ele(args, interactive=True)
+    what = args['what']
+    value = args['value']
+    name = args.get('name')
+
+    try:
+        if what == 'attr':
+            if not name:
+                return ToolResult.fail('attr 需要提供 name')
+            ele.set.attr(name, value)
+        elif what == 'property':
+            if not name:
+                return ToolResult.fail('property 需要提供 name')
+            ele.set.property(name, value)
+        elif what == 'innerHTML':
+            ele.set.innerHTML(value)
+        elif what == 'style':
+            if not name:
+                return ToolResult.fail('style 需要提供 name（样式名，如 display）')
+            ele.set.style(name, value)
+        elif what == 'value':
+            ele.set.value(value)
+        else:
+            return ToolResult.fail(f'不支持的修改类型：{what}')
+    except Exception as exc:
+        return ToolResult.fail(f'修改元素失败：{type(exc).__name__}: {exc}')
+
+    return ToolResult.ok(data={'what': what, 'name': name, 'value': value},
+                         text=f'已修改元素 {what}')
 
 
 @registry.tool(
@@ -370,7 +502,7 @@ def dp_get_link(args: dict) -> ToolResult:
     mutating=True,
 )
 def dp_click(args: dict) -> ToolResult:
-    ele = _resolve_ele(args)
+    ele = _resolve_ele(args, interactive=True)
     times = int(args.get('times') or 1)
     if args.get('for_new_tab'):
         ele.click.for_new_tab(by_js=bool(args.get('by_js', False)))
@@ -398,7 +530,7 @@ def dp_click(args: dict) -> ToolResult:
     mutating=True,
 )
 def dp_input(args: dict) -> ToolResult:
-    ele = _resolve_ele(args)
+    ele = _resolve_ele(args, interactive=True)
     ele.input(
         args['text'],
         clear=bool(args.get('clear', False)),
@@ -420,7 +552,7 @@ def dp_input(args: dict) -> ToolResult:
     mutating=True,
 )
 def dp_clear(args: dict) -> ToolResult:
-    _resolve_ele(args).clear(by_js=bool(args.get('by_js', False)))
+    _resolve_ele(args, interactive=True).clear(by_js=bool(args.get('by_js', False)))
     return ToolResult.ok(text='已清空')
 
 
@@ -438,7 +570,7 @@ def dp_clear(args: dict) -> ToolResult:
     mutating=True,
 )
 def dp_check(args: dict) -> ToolResult:
-    ele = _resolve_ele(args)
+    ele = _resolve_ele(args, interactive=True)
     ele.check(uncheck=bool(args.get('uncheck', False)), by_js=bool(args.get('by_js', False)))
     return ToolResult.ok(text='已取消勾选' if args.get('uncheck') else '已勾选')
 
@@ -457,7 +589,7 @@ def dp_check(args: dict) -> ToolResult:
     mutating=True,
 )
 def dp_hover(args: dict) -> ToolResult:
-    ele = _resolve_ele(args)
+    ele = _resolve_ele(args, interactive=True)
     ele.hover(offset_x=args.get('offset_x'), offset_y=args.get('offset_y'))
     return ToolResult.ok(text='已悬停')
 
@@ -474,7 +606,7 @@ def dp_hover(args: dict) -> ToolResult:
     mutating=True,
 )
 def dp_focus(args: dict) -> ToolResult:
-    _resolve_ele(args).focus()
+    _resolve_ele(args, interactive=True).focus()
     return ToolResult.ok(text='已聚焦')
 
 
@@ -496,7 +628,7 @@ def dp_focus(args: dict) -> ToolResult:
     mutating=True,
 )
 def dp_select_option(args: dict) -> ToolResult:
-    ele = _resolve_ele(args)
+    ele = _resolve_ele(args, interactive=True)
     by = args.get('by') or 'text'
     cancel = bool(args.get('cancel', False))
 
@@ -524,7 +656,7 @@ def dp_select_option(args: dict) -> ToolResult:
     mutating=True,
 )
 def dp_scroll_into_view(args: dict) -> ToolResult:
-    ele = _resolve_ele(args)
+    ele = _resolve_ele(args, interactive=True)
     if args.get('center', True):
         ele.scroll.to_see()
     else:
@@ -549,7 +681,7 @@ def dp_scroll_into_view(args: dict) -> ToolResult:
     mutating=True,
 )
 def dp_drag(args: dict) -> ToolResult:
-    ele = _resolve_ele(args)
+    ele = _resolve_ele(args, interactive=True)
     duration = float(args.get('duration') or 0.5)
 
     if args.get('to_element_id') or args.get('to_selector'):

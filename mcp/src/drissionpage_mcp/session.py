@@ -184,6 +184,54 @@ class DpSession:
             self._current_tab_id = None
             self._elements.clear()
 
+    # -- 请求模式（SessionPage，不启动浏览器）---------------------------------
+
+    @property
+    def session_page(self) -> Any:
+        """惰性创建 SessionPage。
+
+        请求模式与浏览器模式并行存在、互不影响：浏览器负责渲染与交互，
+        SessionPage 负责纯 HTTP 请求（复用 cookies 后可以完全脱离浏览器抓数据）。
+        """
+        sp = getattr(self, '_session_page', None)
+        if sp is None:
+            with self._lock:
+                sp = getattr(self, '_session_page', None)
+                if sp is None:
+                    sp = _dp.SessionPage()
+                    self._session_page = sp
+        return sp
+
+    def get_session_page(self) -> Any:
+        return self.session_page
+
+    def close_session_page(self) -> bool:
+        """关闭请求模式会话（不影响浏览器）。返回是否真的关闭了。"""
+        sp = getattr(self, '_session_page', None)
+        if sp is None:
+            return False
+        try:
+            sp.close()
+        except Exception:
+            pass
+        self._session_page = None
+        return True
+
+    # -- 离线解析树标记 ------------------------------------------------------
+
+    def tag_root(self, root_id: str, note: Optional[str] = None) -> None:
+        """给离线解析树的根节点打标记，便于区分「浏览器元素」与「离线元素」。"""
+        with self._lock:
+            record = self._elements.get(root_id)
+            if record is not None:
+                record['root'] = True
+                record['note'] = note
+
+    @property
+    def offline_root_count(self) -> int:
+        with self._lock:
+            return sum(1 for r in self._elements.values() if r.get('root'))
+
     # -- 标签页 -------------------------------------------------------------
 
     def set_current_tab(self, tab_id: str) -> None:
@@ -272,6 +320,9 @@ class DpSession:
                 info['current_title'] = getattr(tab, 'title', None)
             except Exception as exc:
                 info['current_url_error'] = str(exc)
+        sp = getattr(self, '_session_page', None)
+        info['session_page_active'] = sp is not None
+        info['offline_root_count'] = self.offline_root_count
         info['launch'] = self._launch_summary
         return info
 

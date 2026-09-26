@@ -2,6 +2,7 @@
 """导航、等待、滚动与页面信息工具。"""
 from __future__ import annotations
 
+from .. import compat
 from ..core import BOOL, INT, NUM, STR, ToolResult, registry, schema
 from ..session import SELECTOR_DOC, SESSION
 
@@ -260,3 +261,102 @@ def dp_resize(args: dict) -> ToolResult:
     tab = SESSION.resolve_tab()
     tab.set.window.size(int(args['width']), int(args['height']))
     return ToolResult.ok(text=f"窗口已调整为 {args['width']}x{args['height']}")
+
+
+@registry.tool(
+    name='dp_set_timeouts',
+    description=(
+        '设置页面各类超时（对应 page.set.timeouts）。\n'
+        'base 是基础超时（所有操作默认用它），page_load 是页面加载超时，'
+        'script 是脚本执行超时，implicit 是找元素时的隐式等待。\n'
+        '调小能让失败快速暴露，调大适合慢站；长循环采集里显式设置比用默认值更可控。'
+    ),
+    input_schema=schema(
+        base=NUM('基础超时秒数（所有操作的默认值）'),
+        page_load=NUM('页面加载超时秒数'),
+        script=NUM('脚本执行超时秒数'),
+        implicit=NUM('隐式等待秒数（找元素时的默认等待）'),
+    ),
+    group='navigate',
+    mutating=True,
+)
+def dp_set_timeouts(args: dict) -> ToolResult:
+    tab = SESSION.resolve_tab()
+    # 4.0.5.6 支持 implicit，4.1.x 已移除该参数；compat 会按真实签名过滤
+    result = compat.set_timeouts(
+        tab,
+        base=args.get('base'),
+        page_load=args.get('page_load'),
+        script=args.get('script'),
+        implicit=args.get('implicit'),
+    )
+    text = f"已设置超时：{result['applied']}"
+    if result['dropped']:
+        text += f"（当前 DrissionPage 版本不支持 {result['dropped']}，已忽略）"
+    return ToolResult.ok(data=result, text=text)
+
+
+@registry.tool(
+    name='dp_set_retry',
+    description=(
+        '设置页面级重试策略（对应 page.set.retry_times / page.set.retry_interval）。\n'
+        '与 dp_navigate 的 retry/interval 区别：那两个是**单次调用参数**，只作用于这一次跳转；'
+        '本工具是**持久设置**，设一次之后该页所有加载都生效——'
+        '长循环采集里应该用本工具，而不是每次翻页都传一遍。\n'
+        '注意 retry_times 是「失败后最多再试几次」，不是总次数：'
+        'retry_times(2) = 最多发 3 次请求。\n'
+        '实测：本工具设置的次数与间隔会写回 page.retry_times / page.retry_interval 属性，'
+        '返回值里回读出来供确认。'
+    ),
+    input_schema=schema(
+        times=INT('失败重试次数（0 = 不重试）', minimum=0),
+        interval=NUM('重试间隔秒数', minimum=0),
+        tab_id=STR('指定标签页，缺省当前页'),
+    ),
+    group='navigate',
+    mutating=True,
+)
+def dp_set_retry(args: dict) -> ToolResult:
+    if args.get('times') is None and args.get('interval') is None:
+        return ToolResult.fail('至少要传 times 或 interval 之一')
+
+    tab = SESSION.resolve_tab(args.get('tab_id'))
+    setter = getattr(tab, 'set', None)
+    if setter is None:
+        return ToolResult.fail('当前对象没有 set 接口，无法设置重试策略')
+
+    applied = {}
+    dropped = []
+
+    if args.get('times') is not None:
+        func = getattr(setter, 'retry_times', None)
+        if callable(func):
+            func(int(args['times']))
+            applied['retry_times'] = int(args['times'])
+        else:
+            dropped.append('retry_times')
+
+    if args.get('interval') is not None:
+        func = getattr(setter, 'retry_interval', None)
+        if callable(func):
+            func(args['interval'])
+            applied['retry_interval'] = args['interval']
+        else:
+            dropped.append('retry_interval')
+
+    if not applied:
+        return ToolResult.fail(f'当前 DrissionPage 版本不支持这些设置：{dropped}')
+
+    # 回读校验：确认设置真的落到了页面对象上
+    verified = {}
+    for name in ('retry_times', 'retry_interval'):
+        try:
+            verified[name] = getattr(tab, name, None)
+        except Exception:
+            verified[name] = None
+
+    data = {'applied': applied, 'dropped': dropped, 'verified': verified}
+    text = f'已设置重试策略：{applied}（回读 {verified}）'
+    if dropped:
+        text += f'；当前版本不支持 {dropped}，已忽略'
+    return ToolResult.ok(data=data, text=text)

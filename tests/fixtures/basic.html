@@ -40,6 +40,21 @@
   <!-- 用于测试网络监听 -->
   <div id="netarea"></div>
 
+  <!-- iframe：内容在独立框架页内，普通选择器定位不到 -->
+  <iframe id="inner-frame" src="frame.html" width="240" height="40"></iframe>
+
+  <!-- Shadow DOM 宿主：shadow root 里的内容普通选择器无法穿透 -->
+  <div id="shadow-host"></div>
+
+  <script>
+    // Shadow DOM 必须由脚本挂载（也可以在 HTML 里写声明式 shadowrootmode）
+    (function () {
+      var root = document.getElementById('shadow-host').attachShadow({ mode: 'open' });
+      root.innerHTML = '<span class="shadow-item">影子条目一</span>' +
+                       '<span class="shadow-item">影子条目二</span>';
+    })();
+  </script>
+
   <script>
     // 页面加载后自动发一次真实请求（同目录 json），供网络监听测试捕获
     setTimeout(function () {
