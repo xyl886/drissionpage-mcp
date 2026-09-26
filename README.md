@@ -73,21 +73,46 @@ drissionpage-mcp/
 ### 1. 装 MCP
 
 ```bash
-uv venv .venv
-uv pip install mcp DrissionPage      # 依赖
-uv pip install -e mcp                # 再装本仓库的 Server 本身
+uv venv .venv                 # uv 会自动使用当前目录的这个 .venv，无需先 activate
+uv pip install -e mcp         # 装 Server 本身，mcp SDK 与 DrissionPage 会一并装上
 ```
 
-装完就有 `drissionpage-mcp` 命令，也能 `python -m drissionpage_mcp`。
-只想跑不想装的话，跳过最后一行、把 `<本仓库>/mcp/src` 加进 `PYTHONPATH` 即可。
+`mcp/pyproject.toml` 里写的是 `DrissionPage>=4.0.5.6`，**不钉版本就会装到最新的 4.1.x**
+（实测当前解析为 `drissionpage==4.1.1.4`）。想留在 4.0.x 请显式指定：
 
-依赖版本上有两点值得先决定：
+```bash
+uv pip install -e mcp "DrissionPage==4.0.5.6"
+```
 
-- `mcp >= 2.0.0`：本项目**不使用**已在 mcp 2.0 中移除的 `mcp.server.fastmcp`。
-- **DrissionPage 装 4.0.x 还是 4.1.x 都行**，但 4.1.x 起改为限制商业用途的自定义许可，
-  请先看文末[许可证](#许可证)一节再定。
+> ⚠️ 4.1.x 起 DrissionPage 改为限制商业用途的自定义许可，装之前先看文末
+> [许可证](#许可证)一节——默认命令不会替你避开它。
 
-挂到 MCP 客户端（Claude Code / Cursor / DSH 等）：
+**装完要激活环境**，否则 `python` 仍是系统解释器，包里什么都没有：
+
+```bash
+.venv\Scripts\Activate.ps1     # Windows PowerShell
+source .venv/bin/activate      # macOS / Linux
+```
+
+激活后就有 `drissionpage-mcp` 命令，也能 `python -m drissionpage_mcp`。
+不想激活也不想装包的话，把 `<本仓库>/mcp/src` 加进 `PYTHONPATH` 直接跑源码
+（但那个解释器里仍需自行装好 `mcp` 与 `DrissionPage`）。
+
+挂到 MCP 客户端。**Claude Code / Cursor** 这类读 `mcpServers` 的客户端：
+
+```json
+{
+  "mcpServers": {
+    "drissionpage": {
+      "command": "<本仓库>/.venv/Scripts/python.exe",
+      "args": ["-m", "drissionpage_mcp"]
+    }
+  }
+}
+```
+
+`command` 直接指向 `.venv` 里的解释器（macOS / Linux 为 `<本仓库>/.venv/bin/python`），
+包已经在那里，**不需要 `env.PYTHONPATH`**。只有「不装包、跑源码」才用下面这种写法：
 
 ```json
 {
@@ -101,10 +126,10 @@ uv pip install -e mcp                # 再装本仓库的 Server 本身
 }
 ```
 
-上面是「没装包」的写法：靠 `env.PYTHONPATH` 找到源码，`command` 用你自己的解释器。
-如果已经 `pip install -e mcp`，可以简化成 `{"command": "drissionpage-mcp"}`，不需要 `env`。
+**DSH 不读 `mcpServers`**，它读 `~/.dsh/profiles/web/cordis.patch.yml`，
+写法见 [`mcp/README.md`](mcp/README.md#挂载到-dsh)（该锚点指向 34 行的小节）。
 
-自检：
+自检（在已激活的 `.venv` 里）：
 
 ```bash
 python -m drissionpage_mcp --doctor        # 环境 + 工具数量与分组
